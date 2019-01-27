@@ -38,13 +38,24 @@ namespace HttpFolderDownloader
                 currentUrl = model.Url;
             var client = new HttpClient();
 
-            Console.WriteLine($"Url: {client.BaseAddress}/{currentUrl}");
+            Console.WriteLine($"Url: {currentUrl}");
 
-            var filepath = model.Path.TrimEnd('\\') + "\\" + currentUrl.Replace(model.Url, "").Replace("/", "\\");
+            var filepath = model.Path.TrimEnd('\\') + "\\" + currentUrl.Replace(model.Url, "")
+                               .Replace("/", "\\").Replace("http:\\\\", "")
+                               .Replace("https:\\\\", "");
             if (File.Exists(filepath) && !model.Overwrite)
                 return;
 
-                var response = await client.GetAsync(currentUrl);
+            HttpResponseMessage response;
+            try
+            {
+                response = await client.GetAsync(currentUrl);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.StackTrace);
+                return;
+            }
 
             var contentType = response.Content.Headers.ContentType.MediaType;
             Console.WriteLine($"MediaType: {contentType}");
@@ -60,7 +71,7 @@ namespace HttpFolderDownloader
                 var links = ExtractHref(content);
 
                 foreach (var link in links)
-                    await DoExtraction(model, currentUrl + link, depth: depth > 0 ? depth - 1 : -1);
+                    await DoExtraction(model, Regex.IsMatch(link, "^(http)", RegexOptions.IgnoreCase) ? link : currentUrl + link, depth: depth > 0 ? depth - 1 : depth == 0 ? 0 : -1);
             }
             else if (IsDownloadMime(model, contentType))
             {
@@ -68,21 +79,21 @@ namespace HttpFolderDownloader
                 //var filepath = model.Path.TrimEnd('\\') + "\\" + currentUrl.Replace(model.Url, "").Replace("/", "\\");
                 //if (!File.Exists(filepath) || model.Overwrite)
                 //{
-                    var filename = Path.GetFileName(filepath);
-                    var path = Path.GetFullPath(filepath).Substring(0, filepath.Length - filename.Length);
-                    Console.WriteLine($"Will save to {filepath} ...");
-                    Directory.CreateDirectory(path);
-                    var file = File.Create(filepath);
+                var filename = Path.GetFileName(filepath);
+                var path = Path.GetFullPath(filepath).Substring(0, filepath.Length - filename.Length);
+                Console.WriteLine($"Will save to {filepath} ...");
+                Directory.CreateDirectory(path);
+                var file = File.Create(filepath);
 
-                    var content = await response.Content.ReadAsStreamAsync();
-                    using (var stream = new StreamContent(content))
-                        await stream.CopyToAsync(file);
+                var content = await response.Content.ReadAsStreamAsync();
+                using (var stream = new StreamContent(content))
+                    await stream.CopyToAsync(file);
 
-                    Data.TotalDownloadSize += file.Length;
-                    Data.BytesTransferred += file.Length;
-                    Data.FilesDownloaded++;
+                Data.TotalDownloadSize += file.Length;
+                Data.BytesTransferred += file.Length;
+                Data.FilesDownloaded++;
 
-                    file.Close();
+                file.Close();
                 //}
             }
         }
@@ -99,7 +110,7 @@ namespace HttpFolderDownloader
 
         private static IEnumerable<string> ExtractHref(string content)
         {
-            foreach (var match in Regex.Matches(content, "(?<=href=\").*(?=\")", RegexOptions.IgnoreCase | RegexOptions.Multiline))
+            foreach (var match in Regex.Matches(content, "(?<=href=\").*?(?=\")", RegexOptions.IgnoreCase | RegexOptions.Multiline))
                 if (!match.ToString().EqualsIgnoreCase("../") && !match.ToString().EqualsIgnoreCase("./"))
                     yield return match.ToString();
         }
@@ -154,7 +165,7 @@ namespace HttpFolderDownloader
             for (var i = 0; i < args.Length; i++)
             {
                 if (args.Length > i + 1 && args[i].EqualsIgnoreCase(param))
-                    r.AddRange(args[i+1].TrimStart('"').TrimEnd('\'').Trim().Split(","));
+                    r.AddRange(args[i + 1].TrimStart('"').TrimEnd('\'').Trim().Split(","));
             }
 
             if (def != null && !r.Any())
@@ -167,7 +178,7 @@ namespace HttpFolderDownloader
             for (var i = 0; i < args.Length; i++)
             {
                 if (args.Length > i + 1 && args[i].EqualsIgnoreCase(param))
-                    val = args[i+1].TrimStart('"').TrimEnd('\'').Trim();
+                    val = args[i + 1].TrimStart('"').TrimEnd('\'').Trim();
             }
 
             if (!string.IsNullOrWhiteSpace(def) && string.IsNullOrWhiteSpace(val))
