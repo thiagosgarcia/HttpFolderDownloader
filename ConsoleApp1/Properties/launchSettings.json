@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "HttpFolderDownloader": {
+      "commandName": "Project"
+    }
+  }
+}
