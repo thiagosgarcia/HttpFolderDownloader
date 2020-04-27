@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
@@ -14,7 +15,9 @@ namespace HttpFolderDownloader
     public class Program
     {
         public static Data Data = new Data();
-
+        public static string URL = string.Empty;
+        public static string BASE_URL = string.Empty;
+        public static bool IsHomePage = true;
         public static async Task Main(string[] args)
         {
             if (args == null || args.Length < 2 || Regex.IsMatch(args[0], "--?((help)|[?h])", RegexOptions.IgnoreCase))
@@ -35,8 +38,11 @@ namespace HttpFolderDownloader
         {
             Console.WriteLine();
             if (string.IsNullOrWhiteSpace(currentUrl))
-                currentUrl = model.Url;
-            var client = new HttpClient();
+                currentUrl = WebUtility.UrlDecode(model.Url);
+            var client = new HttpClient()
+            {
+                Timeout = TimeSpan.FromSeconds(10)
+            };
 
             Console.WriteLine($"Url: {currentUrl}");
 
@@ -50,6 +56,8 @@ namespace HttpFolderDownloader
             try
             {
                 response = await client.GetAsync(currentUrl);
+                if(!response.IsSuccessStatusCode)
+                    throw new HttpRequestException();
             }
             catch (Exception ex)
             {
@@ -61,14 +69,16 @@ namespace HttpFolderDownloader
             Console.WriteLine($"MediaType: {contentType}");
             if (IsNavigationMime(model, contentType))
             {
-                if ((depth != -1 && depth <= 0))
+                if ((depth != -1 && depth <= 0) || (model.Url == URL && !IsHomePage))
                     return;
                 //navigate
+                IsHomePage = false;
                 Console.WriteLine($"Will Navigate...");
                 var content = await response.Content.ReadAsStringAsync();
                 Data.BytesTransferred += content.Length;
                 Data.LinksAccessed++;
                 var links = ExtractHref(content);
+                links = NormalizeRelativeLinks(links);
 
                 foreach (var link in links)
                     await DoExtraction(model, Regex.IsMatch(link, "^(http)", RegexOptions.IgnoreCase) ? link : currentUrl + link, depth: depth > 0 ? depth - 1 : depth == 0 ? 0 : -1);
@@ -98,6 +108,17 @@ namespace HttpFolderDownloader
             }
         }
 
+        private static IEnumerable<string> NormalizeRelativeLinks(IEnumerable<string> links)
+        {
+            foreach (var link in links)
+            {
+                if (link.StartsWith("/") || link.StartsWith("#"))
+                    yield return $"{BASE_URL}{link}";
+                else
+                    yield return link;
+            }
+        }
+
         private static bool IsDownloadMime(Model model, string contentType)
         {
             return model.downloadContent.Count < 1 || model.downloadContent.Contains(contentType);
@@ -119,7 +140,7 @@ namespace HttpFolderDownloader
         {
             var model = new Model();
             if (args[0].IsUrl())
-                model.Url = args[0];
+                model.Url = URL = args[0];
             else
             {
                 Console.WriteLine(@"Must include URL parameter.");
@@ -145,6 +166,9 @@ namespace HttpFolderDownloader
             model.downloadContent = ExtractParams(args, "--downloadContent");
             model.navigateContent = ExtractParams(args, "--navigateContent", defNavigate);
             model.Overwrite = ExtractParams(args, "--overwrite", "true");
+
+            var url = new Uri(URL);
+            BASE_URL = $"{url.Scheme}://{url.Host}";
 
             Console.WriteLine(
                 $@"Using: 
